@@ -74,11 +74,12 @@ void set_clipboard_text(const std::string &text) {
 }
 
 void paste_clipboard() {
+  [[maybe_unused]] int ret;
 #ifdef __linux__
-  (void)system("sleep 0.2 && xdotool key --clearmodifiers ctrl+v");
+  ret = system("sleep 0.2 && xdotool key --clearmodifiers ctrl+v");
 #elif __APPLE__
   // osascript to pres command+v?
-  (void)system("osascript -e 'tell application \"System Events\" to keystroke "
+  ret = system("osascript -e 'tell application \"System Events\" to keystroke "
                "\"v\" using command down'");
 #elif _WIN32
 // Windows is harder via system command. Maybe SendKeys via VBS or Powershell?
@@ -89,13 +90,14 @@ void paste_clipboard() {
 }
 
 void notify_user(const std::string &title, const std::string &message) {
+  [[maybe_unused]] int ret;
 #ifdef __linux__
   std::string cmd = "notify-send \"" + title + "\" \"" + message + "\"";
-  (void)system(cmd.c_str());
+  ret = system(cmd.c_str());
 #elif __APPLE__
   std::string cmd = "osascript -e 'display notification \"" + message +
                     "\" with title \"" + title + "\"'";
-  (void)system(cmd.c_str());
+  ret = system(cmd.c_str());
 #elif _WIN32
 // Powershell notification logic is complex, skipping for brevity or use msg *
 // std::string cmd = "msg * " + message;

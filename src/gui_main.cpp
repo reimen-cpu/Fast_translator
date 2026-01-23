@@ -462,7 +462,7 @@ void MainFrame::OnSetShortcut(wxCommandEvent &event) {
   wxMessageBox("Command copied to clipboard!\n\n" + instructions,
                "Set Keyboard Shortcut", wxOK | wxICON_INFORMATION);
 
-  (void)system(settingsCmd.c_str());
+  [[maybe_unused]] int ret = system(settingsCmd.c_str());
 }
 
 void MainFrame::OnInstall(wxCommandEvent &event) {
@@ -602,7 +602,7 @@ std::string MainFrame::DownloadFile(const std::string &url_str,
 
       if (!dialog.Update(progress)) {
         cancelled = true;
-        (void)system("pkill -f curl"); // Kill curl process
+        [[maybe_unused]] int ret = system("pkill -f curl"); // Kill curl process
         break;
       }
 
