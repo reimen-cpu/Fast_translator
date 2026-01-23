@@ -6,19 +6,48 @@
 // #include <sentencepiece_processor.h>
 #include "utils.h"
 #include "translation.h"
-#include <unistd.h>
-#include <linux/limits.h>
-#include <fstream>
+#include "language_graph.h"
+#ifdef _WIN32
+    #include <windows.h>
+    #define PATH_MAX MAX_PATH
+#elif __APPLE__
+    #include <mach-o/dyld.h>
+    #include <limits.h>
+#else
+    #include <unistd.h>
+    #include <linux/limits.h>
+    #include <limits.h> // Ensure limits is included
+#endif
+
 #include <filesystem>
+#include <fstream>
 
 std::string get_executable_dir() {
-    char result[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    if (count != -1) {
-        std::string path(result, count); 
-        return path.substr(0, path.find_last_of("/"));
-    }
-    return "";
+    char buf[PATH_MAX];
+    std::string path;
+    
+    #ifdef _WIN32
+        // Windows
+        GetModuleFileNameA(NULL, buf, PATH_MAX);
+        path = std::string(buf);
+        path = path.substr(0, path.find_last_of("\\"));
+    #elif __APPLE__
+        // macOS
+        uint32_t size = sizeof(buf);
+        if (_NSGetExecutablePath(buf, &size) == 0) {
+            path = std::string(buf);
+            path = path.substr(0, path.find_last_of("/"));
+        }
+    #else
+        // Linux
+        ssize_t count = readlink("/proc/self/exe", buf, PATH_MAX);
+        if (count != -1) {
+            path = std::string(buf, count);
+            path = path.substr(0, path.find_last_of("/"));
+        }
+    #endif
+    
+    return path;
 }
 
 int main(int argc, char* argv[]) {
@@ -36,68 +65,153 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Original: " << input_text << std::endl;
 
-    // 2. Load Models
+    // 2. Determine packages directory
     std::string exe_dir = get_executable_dir();
-    // Assuming 'build' is a subdirectory, and 'packages' is at the project root.
-    // If the executable is in 'build/', we need to go up one level to find 'packages/'.
-    // Or we can assume the user installs it properly.
-    // Let's assume the standard development layout:
-    // root/
-    //   build/argos_native_cpp
-    //   packages/
+    std::string packages_dir = exe_dir + "/packages";
     
-    // Check if 'packages' exists in exe_dir (deployment case)
-    // or in exe_dir/../packages (dev case)
-    
-    std::string base_dir = exe_dir + "/.."; // Default to dev layout (build/..)
-    
-    // Simple check: if packages exists in exe_dir, use it.
-    std::ifstream check_deployment(exe_dir + "/packages");
-    if (check_deployment.good() || std::filesystem::exists(exe_dir + "/packages")) {
-         base_dir = exe_dir;
+    if (!std::filesystem::exists(packages_dir)) {
+         std::string dev_packages = exe_dir + "/../packages";
+         if (std::filesystem::exists(dev_packages)) {
+             packages_dir = dev_packages;
+         }
     }
 
-    // Default: EN -> ES
-    std::string model_dir = base_dir + "/packages/en_es/model"; 
-    std::string sp_model = base_dir + "/packages/en_es/sentencepiece.model";
-
-    // Simple arg to switch to ES -> EN
-    // Usage: ./argos_native_cpp es
-    if (argc > 1 && std::string(argv[1]) == "es") {
-        model_dir = base_dir + "/packages/translate-es_en-1_9/model"; 
-        sp_model = base_dir + "/packages/translate-es_en-1_9/bpe.model"; 
-        std::cout << "Mode: ES -> EN" << std::endl;
+    // 3. Parse arguments for translation route
+    std::vector<std::string> route; // Language codes in order
+    
+    if (argc > 1) {
+        std::string arg = argv[1];
+        
+        // Check for colon-separated chain syntax (from:to or from:mid:to)
+        if (arg.find(':') != std::string::npos) {
+            // Parse explicit chain
+            size_t pos = 0;
+            while (pos < arg.length()) {
+                size_t next_colon = arg.find(':', pos);
+                if (next_colon == std::string::npos) {
+                    route.push_back(arg.substr(pos));
+                    break;
+                } else {
+                    route.push_back(arg.substr(pos, next_colon - pos));
+                    pos = next_colon + 1;
+                }
+            }
+            std::cout << "Chain mode: ";
+            for (size_t i = 0; i < route.size(); i++) {
+                std::cout << route[i];
+                if (i < route.size() - 1) std::cout << " -> ";
+            }
+            std::cout << std::endl;
+        } else {
+            // Legacy single-arg mode (backward compatibility)
+            if (arg == "es") {
+                route = {"es", "en"};
+            } else {
+                // Try to interpret as "from_code" (from -> en)
+                route = {arg, "en"};
+            }
+        }
     } else {
-        std::cout << "Mode: EN -> ES (Default)" << std::endl;
+        // Default: EN -> ES
+        route = {"en", "es"};
     }
 
-    std::cout << "Loading models from: " << model_dir << std::endl;
+    // If only source and target specified, find path automatically
+    if (route.size() == 2) {
+        LanguageGraph graph;
+        graph.BuildFromPackages(packages_dir);
+        
+        std::vector<std::string> path = graph.FindPath(route[0], route[1]);
+        if (!path.empty()) {
+            route = path;
+            if (route.size() > 2) {
+                std::cout << "Auto-route (" << (route.size() - 1) << " hops): ";
+                for (size_t i = 0; i < route.size(); i++) {
+                    std::cout << route[i];
+                    if (i < route.size() - 1) std::cout << " -> ";
+                }
+                std::cout << std::endl;
+            }
+        } else {
+            std::cerr << "Error: No translation path from " << route[0] << " to " << route[1] << std::endl;
+            notify_user("Argos Error", "No translation path available");
+            return 1;
+        }
+    }
 
-    ArgosTranslator translator;
-    // notify_user("Argos", "Loading models..."); // Removed per user request
+    // 4. Execute translation chain
+    std::string current_text = input_text;
     
-    if (!translator.load_model(model_dir, sp_model)) {
-        notify_user("Argos Error", "Failed to load models");
-        return 1;
+    for (size_t i = 0; i < route.size() - 1; i++) {
+        std::string from_lang = route[i];
+        std::string to_lang = route[i + 1];
+        
+        std::cout << "Hop " << (i + 1) << ": " << from_lang << " -> " << to_lang << std::endl;
+        
+        // Find package for this hop
+        LanguageGraph graph;
+        graph.BuildFromPackages(packages_dir);
+        std::string pkg_name = graph.GetPackagePath(from_lang, to_lang);
+        
+        if (pkg_name.empty()) {
+            std::cerr << "Error: No package for " << from_lang << "->" << to_lang << std::endl;
+            notify_user("Argos Error", "Missing translation package");
+            return 1;
+        }
+        
+        // Determine model paths
+        std::string model_dir = packages_dir + "/" + pkg_name + "/model";
+        std::string sp_model = packages_dir + "/" + pkg_name + "/sentencepiece.model";
+        
+        // Try .bpe.model as fallback
+        if (!std::filesystem::exists(sp_model)) {
+            sp_model = packages_dir + "/" + pkg_name + "/bpe.model";
+        }
+        
+        std::cout << "  Loading: " << pkg_name << std::endl;
+        
+        ArgosTranslator translator;
+        if (!translator.load_model(model_dir, sp_model)) {
+            notify_user("Argos Error", "Failed to load model: " + pkg_name);
+            return 1;
+        }
+        
+        current_text = translator.translate(current_text);
+        current_text = decode_html_entities(current_text);
+        
+        // Clean SentencePiece artifacts (▁ = U+2581, UTF-8: E2 96 81)
+        std::string sp_marker = "\xE2\x96\x81"; // ▁
+        // Replace internal markers with spaces
+        size_t pos = 0;
+        while ((pos = current_text.find(sp_marker, pos)) != std::string::npos) {
+            if (pos == 0) {
+                // Remove leading marker
+                current_text.erase(pos, sp_marker.length());
+            } else {
+                // Replace with space
+                current_text.replace(pos, sp_marker.length(), " ");
+                pos += 1;
+            }
+        }
+        
+        std::cout << "  Result: " << current_text << std::endl;
     }
 
-    // 3. Translate
-    std::string translated_text = translator.translate(input_text);
-    
-    // Fix HTML entities (e.g. &apos; -> ')
-    translated_text = decode_html_entities(translated_text);
-
-    // Remove trailing period/whitespace if present (User Request)
-    while (!translated_text.empty() && (std::isspace(translated_text.back()) || translated_text.back() == '.')) {
-        translated_text.pop_back();
+    // 5. Post-process and output
+    // Remove trailing punctuation and whitespace more aggressively
+    while (!current_text.empty()) {
+        char last = current_text.back();
+        if (std::isspace(last) || last == '.' || last == ',' || last == ';' || last == ':') {
+            current_text.pop_back();
+        } else {
+            break;
+        }
     }
 
-    // 4. Paste/Output
-    if (!translated_text.empty()) {
-        std::cout << "Translated: " << translated_text << std::endl;
-        set_clipboard_text(translated_text);
+    if (!current_text.empty()) {
+        std::cout << "Final translation: " << current_text << std::endl;
+        set_clipboard_text(current_text);
         paste_clipboard();
-        // notify_user("Argos", "Translated!"); // Removed per user request
     } else {
         notify_user("Argos Error", "Translation failed");
     }
