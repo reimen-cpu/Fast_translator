@@ -100,10 +100,16 @@ private:
   wxListBox *installedList;
   wxListBox *availableList;
   wxTextCtrl *cmdPreview;
+  wxTextCtrl *searchInstalled;
+  wxTextCtrl *searchAvailable;
 
   std::string packagesDir;
   std::string currentShortcutId; // ID for current selection
   wxButton *btnSetShortcut;      // Reference to button
+
+  // Full lists for filtering
+  std::vector<std::string> allInstalledItems;
+  std::vector<std::string> allAvailableItems;
 
   struct PackageInfo {
     std::string name;
@@ -118,6 +124,10 @@ private:
   void OnSetShortcut(wxCommandEvent &event);
   void OnPackageSelected(wxCommandEvent &event);
   void OnCopyCommand(wxCommandEvent &event);
+  void OnSearchInstalled(wxCommandEvent &event);
+  void OnSearchAvailable(wxCommandEvent &event);
+  void FilterList(wxListBox *list, const std::vector<std::string> &allItems,
+                  const std::string &filter);
   void FetchRemotePackages(); // Helper to dl and parse index
 
   std::string GetLangName(const std::string &code);
@@ -148,9 +158,17 @@ MainFrame::MainFrame(const wxString &title)
   wxPanel *pnlInstalled = new wxPanel(notebook);
   wxBoxSizer *sizerInstalled = new wxBoxSizer(wxVERTICAL);
 
+  // Search bar
+  searchInstalled =
+      new wxTextCtrl(pnlInstalled, wxID_ANY, "", wxDefaultPosition,
+                     wxDefaultSize, wxTE_PROCESS_ENTER);
+  searchInstalled->SetHint("Search...");
+  sizerInstalled->Add(searchInstalled, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP,
+                      5);
+
   sizerInstalled->Add(
       new wxStaticText(pnlInstalled, wxID_ANY, "Installed Languages:"), 0,
-      wxALL, 5);
+      wxLEFT | wxTOP, 5);
 
   installedList = new wxListBox(pnlInstalled, wxID_ANY);
   sizerInstalled->Add(installedList, 1, wxEXPAND | wxALL, 5);
@@ -182,9 +200,17 @@ MainFrame::MainFrame(const wxString &title)
   wxPanel *pnlAvailable = new wxPanel(notebook);
   wxBoxSizer *sizerAvailable = new wxBoxSizer(wxVERTICAL);
 
+  // Search bar
+  searchAvailable =
+      new wxTextCtrl(pnlAvailable, wxID_ANY, "", wxDefaultPosition,
+                     wxDefaultSize, wxTE_PROCESS_ENTER);
+  searchAvailable->SetHint("Search...");
+  sizerAvailable->Add(searchAvailable, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP,
+                      5);
+
   sizerAvailable->Add(
       new wxStaticText(pnlAvailable, wxID_ANY, "Available Packages (Online):"),
-      0, wxALL, 5);
+      0, wxLEFT | wxTOP, 5);
   availableList = new wxListBox(pnlAvailable, wxID_ANY);
   sizerAvailable->Add(availableList, 1, wxEXPAND | wxALL, 5);
 
@@ -207,6 +233,8 @@ MainFrame::MainFrame(const wxString &title)
   btnRemove->Bind(wxEVT_BUTTON, &MainFrame::OnRemove, this);
   btnRefresh->Bind(wxEVT_BUTTON, &MainFrame::OnRefresh, this);
   btnInstall->Bind(wxEVT_BUTTON, &MainFrame::OnInstall, this);
+  searchInstalled->Bind(wxEVT_TEXT, &MainFrame::OnSearchInstalled, this);
+  searchAvailable->Bind(wxEVT_TEXT, &MainFrame::OnSearchAvailable, this);
 
   // Determine packages dir
   std::string exeDir = get_exec_dir();
@@ -274,6 +302,7 @@ void MainFrame::FetchRemotePackages() {
         availablePackages.push_back(info);
 
         std::string label = GetLangName(from) + " -> " + GetLangName(to);
+        allAvailableItems.push_back(label);
         availableList->AppendString(label);
       }
     }
@@ -285,6 +314,7 @@ void MainFrame::FetchRemotePackages() {
 
 void MainFrame::RefreshPackageList() {
   installedList->Clear();
+  allInstalledItems.clear();
   int count = 0;
 
   if (std::filesystem::exists(packagesDir)) {
@@ -317,13 +347,14 @@ void MainFrame::RefreshPackageList() {
         }
 
         // Display in readable format
+        std::string display;
         if (!from_code.empty() && !to_code.empty()) {
-          std::string display =
-              GetLangName(from_code) + " -> " + GetLangName(to_code);
-          installedList->AppendString(display);
+          display = GetLangName(from_code) + " -> " + GetLangName(to_code);
         } else {
-          installedList->AppendString(pkg_name);
+          display = pkg_name;
         }
+        allInstalledItems.push_back(display);
+        installedList->AppendString(display);
       }
     }
 
@@ -463,6 +494,35 @@ void MainFrame::OnSetShortcut(wxCommandEvent &event) {
                "Set Keyboard Shortcut", wxOK | wxICON_INFORMATION);
 
   [[maybe_unused]] int ret = system(settingsCmd.c_str());
+}
+
+// Filter helper function
+void MainFrame::FilterList(wxListBox *list,
+                           const std::vector<std::string> &allItems,
+                           const std::string &filter) {
+  list->Clear();
+  std::string lowerFilter = filter;
+  std::transform(lowerFilter.begin(), lowerFilter.end(), lowerFilter.begin(),
+                 ::tolower);
+
+  for (const auto &item : allItems) {
+    std::string lowerItem = item;
+    std::transform(lowerItem.begin(), lowerItem.end(), lowerItem.begin(),
+                   ::tolower);
+    if (filter.empty() || lowerItem.find(lowerFilter) != std::string::npos) {
+      list->AppendString(item);
+    }
+  }
+}
+
+void MainFrame::OnSearchInstalled(wxCommandEvent &event) {
+  std::string filter = searchInstalled->GetValue().ToStdString();
+  FilterList(installedList, allInstalledItems, filter);
+}
+
+void MainFrame::OnSearchAvailable(wxCommandEvent &event) {
+  std::string filter = searchAvailable->GetValue().ToStdString();
+  FilterList(availableList, allAvailableItems, filter);
 }
 
 void MainFrame::OnInstall(wxCommandEvent &event) {
