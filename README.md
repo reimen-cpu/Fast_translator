@@ -19,11 +19,11 @@
 <tr>
 <td width="50%">
 <img src="https://raw.githubusercontent.com/reimen-cpu/Fast_translator/main/img/Screenshot_20260122_225326.png" alt="Installed Languages" style="max-width:100%;">
-<p align="center"><em>Package Manager - Installed Languages</em></p>
+<p align="center"><em>Package Manager - Available Packages</em></p>
 </td>
 <td width="50%">
 <img src="https://raw.githubusercontent.com/reimen-cpu/Fast_translator/main/img/Screenshot_20260122_225346.png" alt="Available Packages" style="max-width:100%;">
-<p align="center"><em>Package Manager - Available Packages</em></p>
+<p align="center"><em>Package Manager - Installed Languages</em></p>
 </td>
 </tr>
 </table>
