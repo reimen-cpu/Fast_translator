@@ -10,48 +10,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # -----------------------
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SentencePiece REQUIRED sentencepiece)
+pkg_check_modules(Protobuf REQUIRED protobuf)
 
-find_package(absl CONFIG REQUIRED)
-find_package(Protobuf CONFIG REQUIRED)
-find_package(ctranslate2 REQUIRED)
-find_package(wxWidgets CONFIG REQUIRED)
+# Find CUDA libraries if available  
+find_package(CUDAToolkit QUIET)
 
-link_directories(/home/reimen/vcpkg/installed/x64-linux/lib) # Quick fix for pkg-config libs
-include_directories(${CMAKE_SOURCE_DIR}/src ${SentencePiece_INCLUDE_DIRS})
-
-# -----------------------
-# Función para crear build por plataforma
-# -----------------------
-function(configure_target PLATFORM TRIPLET)
-    # Carpeta de build específica
-    set(BUILD_DIR "${CMAKE_BINARY_DIR}/build_${PLATFORM}")
-    file(MAKE_DIRECTORY ${BUILD_DIR})
-
-    # Ejecuta configuración y compilación secuencial
-    execute_process(
-        COMMAND cmake
-            -S ${CMAKE_SOURCE_DIR}
-            -B ${BUILD_DIR}
-            -DCMAKE_TOOLCHAIN_FILE=/home/reimen/vcpkg/scripts/buildsystems/vcpkg.cmake
-            -DVCPKG_TARGET_TRIPLET=${TRIPLET}
-            -DIS_CHILD_BUILD=ON
-        RESULT_VARIABLE res_config
-    )
-    if(NOT res_config EQUAL 0)
-        message(FATAL_ERROR "CMake configuration failed for ${PLATFORM}")
-    endif()
-
-    execute_process(
-        COMMAND cmake --build ${BUILD_DIR} --config Release
-        RESULT_VARIABLE res_build
-    )
-    if(NOT res_build EQUAL 0)
-        message(FATAL_ERROR "Build failed for ${PLATFORM}")
-    endif()
-endfunction()
+# Include directories
+include_directories(${CMAKE_SOURCE_DIR}/src ${SentencePiece_INCLUDE_DIRS} /usr/local/include)
+link_directories(/usr/local/lib ${SentencePiece_LIBRARY_DIRS} ${Protobuf_LIBRARY_DIRS})
 
 # -----------------------
-# Definición del ejecutable (compartido)
+# Definición del ejecutable principal
 # -----------------------
 add_executable(Fast_translator
     src/main.cpp
@@ -64,31 +33,33 @@ add_executable(Fast_translator
 target_link_libraries(Fast_translator
     PRIVATE
     ${SentencePiece_LIBRARIES}
-    ctranslate2
-    protobuf::libprotobuf
+    /usr/local/lib/libctranslate2.so
+    ${Protobuf_LIBRARIES}
 )
+
+# Add CUDA libraries if available
+if(CUDAToolkit_FOUND)
+    target_link_libraries(Fast_translator PRIVATE CUDA::cudart CUDA::cublas)
+    message(STATUS "Linking with CUDA libraries for GPU support")
+endif()
 
 # -----------------------
 # Definición del gestor GUI (wxWidgets)
 # -----------------------
-add_executable(Fast_translator_manager
-    src/gui_main.cpp
-)
-target_link_libraries(Fast_translator_manager
-    PRIVATE
-    wx::core
-    wx::base
-    wx::net
-)
+# Try to find wxWidgets (from vcpkg or system)
+find_package(wxWidgets CONFIG QUIET)
 
-# -----------------------
-# Builds secuenciales
-# -----------------------
-# Linux
-# Linux
-if(NOT IS_CHILD_BUILD)
-    configure_target("linux" "x64-linux")
-    
-    # Windows cross-compile (MinGW)
-    # configure_target("windows" "x64-windows") # Commented out to avoid failing if not setup
+if(wxWidgets_FOUND OR TARGET wx::core)
+    message(STATUS "wxWidgets found - building GUI manager")
+    add_executable(Fast_translator_manager
+        src/gui_main.cpp
+    )
+    target_link_libraries(Fast_translator_manager
+        PRIVATE
+        wx::core
+        wx::base
+        wx::net
+    )
+else()
+    message(STATUS "wxWidgets not found - skipping GUI manager. Use vcpkg toolchain to build GUI.")
 endif()

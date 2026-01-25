@@ -3,16 +3,36 @@
 #include "tokenizer_bpe.h"
 #include "tokenizer_sp.h"
 #include <algorithm>
+#include <ctranslate2/devices.h>
 #include <ctranslate2/translator.h>
 #include <thread>
 
 struct ArgosTranslator::Impl {
   std::unique_ptr<Tokenizer> tokenizer;
   std::unique_ptr<ctranslate2::Translator> translator;
+  ctranslate2::Device device_used;
 };
 
 ArgosTranslator::ArgosTranslator() : impl(std::make_unique<Impl>()) {}
 ArgosTranslator::~ArgosTranslator() = default;
+
+// Detect best available device: GPU if available, otherwise CPU
+static ctranslate2::Device get_best_device() {
+  try {
+    int gpu_count = ctranslate2::get_gpu_count();
+    if (gpu_count > 0) {
+      std::cerr << "[Info] CUDA GPU detected (" << gpu_count
+                << " device(s)), using GPU acceleration" << std::endl;
+      return ctranslate2::Device::CUDA;
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "[Info] CUDA check failed: " << e.what() << std::endl;
+  } catch (...) {
+    // CUDA not available
+  }
+  std::cerr << "[Info] No GPU detected, using CPU" << std::endl;
+  return ctranslate2::Device::CPU;
+}
 
 // Calculate optimal thread count: use ~75% of available cores, minimum 1
 static size_t get_optimal_threads() {
@@ -40,14 +60,16 @@ bool ArgosTranslator::load_model(const std::string &model_path,
   }
 
   try {
-    // Calculate safe thread count (75% of cores)
+    // Detect best available device
+    ctranslate2::Device device = get_best_device();
+    impl->device_used = device;
+
+    // Calculate safe thread count (75% of cores) - only used for CPU
     size_t num_threads = get_optimal_threads();
 
-    // Create translator with controlled thread usage
-    // inter_threads=1: single translation at a time
-    // intra_threads=num_threads: threads per translation operation
+    // Create translator with automatic device selection
     impl->translator = std::make_unique<ctranslate2::Translator>(
-        model_path, ctranslate2::Device::CPU, ctranslate2::ComputeType::DEFAULT,
+        model_path, device, ctranslate2::ComputeType::DEFAULT,
         std::vector<int>{0}, // device_indices
         false,               // tensor_parallel
         ctranslate2::ReplicaPoolConfig{
@@ -55,8 +77,12 @@ bool ArgosTranslator::load_model(const std::string &model_path,
             /* max_queued_batches */ 0,
             /* cpu_core_offset */ -1});
 
-    std::cerr << "[Info] Using " << num_threads
-              << " CPU threads for translation" << std::endl;
+    if (device == ctranslate2::Device::CUDA) {
+      std::cerr << "[Info] Model loaded on GPU" << std::endl;
+    } else {
+      std::cerr << "[Info] Using " << num_threads
+                << " CPU threads for translation" << std::endl;
+    }
   } catch (const std::exception &e) {
     std::cerr << "Failed to load CTranslate2 model: " << e.what() << std::endl;
     return false;
