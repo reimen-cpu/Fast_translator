@@ -17,13 +17,17 @@
 <div align="center">
 <table>
 <tr>
-<td width="50%">
-<img src="https://raw.githubusercontent.com/reimen-cpu/Fast_translator/main/img/Screenshot_20260122_225326.png" alt="Installed Languages" style="max-width:100%;">
-<p align="center"><em>Package Manager - Available Packages</em></p>
+<td width="33%">
+<img src="https://raw.githubusercontent.com/reimen-cpu/Fast_translator/main/img/installed%20languages.png" alt="Installed Languages" style="max-width:100%;">
+<p align="center"><em>Installed Packages</em></p>
 </td>
-<td width="50%">
-<img src="https://raw.githubusercontent.com/reimen-cpu/Fast_translator/main/img/Screenshot_20260122_225346.png" alt="Available Packages" style="max-width:100%;">
-<p align="center"><em>Package Manager - Installed Languages</em></p>
+<td width="33%">
+<img src="https://raw.githubusercontent.com/reimen-cpu/Fast_translator/main/img/aviable%20languages.png" alt="Available Packages" style="max-width:100%;">
+<p align="center"><em>Available Packages</em></p>
+</td>
+<td width="33%">
+<img src="https://raw.githubusercontent.com/reimen-cpu/Fast_translator/main/img/ai%20providers.png" alt="AI Settings" style="max-width:100%;">
+<p align="center"><em>AI Settings</em></p>
 </td>
 </tr>
 </table>
