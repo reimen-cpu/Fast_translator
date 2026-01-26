@@ -38,7 +38,7 @@
 ## 🎥 AI Demonstration
 
 <div align="center">
-  <video src="https://github.com/reimen-cpu/Fast_translator/raw/main/img/AI%20Demonstration.mp4" width="33%" controls autoplay loop muted playsinline></video>
+  <img src="https://raw.githubusercontent.com/reimen-cpu/Fast_translator/main/img/AI_Demonstration.gif" width="33%" alt="AI Demonstration">
 </div>
 
 ---
