@@ -6,6 +6,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # -----------------------
+# Configuración para ejecutables portables
+# -----------------------
+# Enlazar estáticamente libstdc++ y libgcc para portabilidad
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
+
+# Optimizaciones para reducir dependencias
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
+
+# -----------------------
 # Configuración común
 # -----------------------
 find_package(PkgConfig REQUIRED)
@@ -22,12 +32,15 @@ link_directories(/usr/local/lib ${SentencePiece_LIBRARY_DIRS} ${Protobuf_LIBRARY
 # -----------------------
 # Definición del ejecutable principal
 # -----------------------
+find_package(CURL REQUIRED)
+
 add_executable(Fast_translator
     src/main.cpp
     src/utils.cpp
     src/translation.cpp
     src/tokenizer_bpe.cpp
     src/language_graph.cpp
+    src/ollama.cpp
 )
 
 target_link_libraries(Fast_translator
@@ -35,6 +48,7 @@ target_link_libraries(Fast_translator
     ${SentencePiece_LIBRARIES}
     /usr/local/lib/libctranslate2.so
     ${Protobuf_LIBRARIES}
+    CURL::libcurl
 )
 
 # Add CUDA libraries if available
@@ -53,12 +67,14 @@ if(wxWidgets_FOUND OR TARGET wx::core)
     message(STATUS "wxWidgets found - building GUI manager")
     add_executable(Fast_translator_manager
         src/gui_main.cpp
+        src/ollama.cpp
     )
     target_link_libraries(Fast_translator_manager
         PRIVATE
         wx::core
         wx::base
         wx::net
+        CURL::libcurl
     )
 else()
     message(STATUS "wxWidgets not found - skipping GUI manager. Use vcpkg toolchain to build GUI.")

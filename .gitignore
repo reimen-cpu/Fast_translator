@@ -1,11 +1,15 @@
 # Archivos de compilación
 /build/
+/build-deb/
+/deb-build/
+/dist/
 /bin/
 /obj/
 /out/
 /Debug/
 /Release/
 /packages/
+*.deb
 # Archivos generados por CMake
 CMakeFiles/
 CMakeCache.txt

@@ -1,0 +1,110 @@
+cmake_minimum_required(VERSION 3.16)
+
+project(argos_native_cpp LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# -----------------------
+# Configuración para .deb portable
+# -----------------------
+# RPATH relativo para libs privadas en /usr/lib/fast-translator
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib/fast-translator")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
+
+# Enlace estático de libstdc++ y libgcc
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
+
+# Eliminar referencias a paths locales
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--disable-new-dtags")
+
+# -----------------------
+# Configuración común
+# -----------------------
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SentencePiece REQUIRED sentencepiece)
+pkg_check_modules(Protobuf REQUIRED protobuf)
+
+# Find CUDA libraries if available  
+find_package(CUDAToolkit QUIET)
+
+# Include directories - solo rutas del sistema
+include_directories(${CMAKE_SOURCE_DIR}/src ${SentencePiece_INCLUDE_DIRS} /usr/local/include)
+link_directories(/usr/local/lib ${SentencePiece_LIBRARY_DIRS} ${Protobuf_LIBRARY_DIRS})
+
+# -----------------------
+# Definición del ejecutable principal
+# -----------------------
+find_package(CURL REQUIRED)
+
+add_executable(fast-translator
+    src/main.cpp
+    src/utils.cpp
+    src/translation.cpp
+    src/tokenizer_bpe.cpp
+    src/language_graph.cpp
+    src/ollama.cpp
+)
+
+target_link_libraries(fast-translator
+    PRIVATE
+    ${SentencePiece_LIBRARIES}
+    /usr/local/lib/libctranslate2.so
+    ${Protobuf_LIBRARIES}
+    CURL::libcurl
+)
+
+# Add CUDA libraries if available
+if(CUDAToolkit_FOUND)
+    target_link_libraries(fast-translator PRIVATE CUDA::cudart CUDA::cublas)
+    message(STATUS "Linking with CUDA libraries for GPU support")
+endif()
+
+# -----------------------
+# Definición del gestor GUI (wxWidgets)
+# -----------------------
+# Buscar wxWidgets del sistema primero, luego vcpkg
+find_package(wxWidgets COMPONENTS core base net QUIET)
+
+if(wxWidgets_FOUND)
+    message(STATUS "wxWidgets found (system) - building GUI manager")
+    include(${wxWidgets_USE_FILE})
+    add_executable(fast-translator-manager
+        src/gui_main.cpp
+        src/ollama.cpp
+    )
+    target_link_libraries(fast-translator-manager
+        PRIVATE
+        ${wxWidgets_LIBRARIES}
+        curl
+    )
+else()
+    # Fallback to vcpkg/CONFIG mode
+    find_package(wxWidgets CONFIG QUIET)
+    if(TARGET wx::core)
+        message(STATUS "wxWidgets found (vcpkg) - building GUI manager")
+        add_executable(fast-translator-manager
+            src/gui_main.cpp
+            src/ollama.cpp
+        )
+        target_link_libraries(fast-translator-manager
+            PRIVATE
+            wx::core
+            wx::base
+            wx::net
+            curl
+        )
+    else()
+        message(STATUS "wxWidgets not found - skipping GUI manager")
+    endif()
+endif()
+
+# -----------------------
+# Instalación
+# -----------------------
+install(TARGETS fast-translator DESTINATION bin)
+if(TARGET fast-translator-manager)
+    install(TARGETS fast-translator-manager DESTINATION bin)
+endif()

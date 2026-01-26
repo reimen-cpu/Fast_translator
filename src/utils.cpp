@@ -28,10 +28,29 @@ std::string exec(const char *cmd) {
 
 std::string get_clipboard_text() {
 #ifdef __linux__
-  // Emulate: xclip -selection primary -o 2>/dev/null
+  // Check DISPLAY env
+  const char *display = std::getenv("DISPLAY");
+  std::cerr << "[DEBUG] get_clipboard_text: DISPLAY="
+            << (display ? display : "(null)") << std::endl;
+
   try {
-    return exec("xclip -selection primary -o 2>/dev/null");
+    std::string result = exec("xclip -selection primary -o 2>/dev/null");
+    std::cerr << "[DEBUG] get_clipboard_text: got " << result.size() << " bytes"
+              << std::endl;
+    if (result.empty()) {
+      std::cerr << "[DEBUG] Primary selection empty, trying clipboard..."
+                << std::endl;
+      result = exec("xclip -selection clipboard -o 2>/dev/null");
+      std::cerr << "[DEBUG] Clipboard fallback got " << result.size()
+                << " bytes" << std::endl;
+    }
+    return result;
+  } catch (const std::exception &e) {
+    std::cerr << "[ERROR] get_clipboard_text exception: " << e.what()
+              << std::endl;
+    return "";
   } catch (...) {
+    std::cerr << "[ERROR] get_clipboard_text unknown exception" << std::endl;
     return "";
   }
 #elif __APPLE__
@@ -52,11 +71,21 @@ std::string get_clipboard_text() {
 }
 
 void set_clipboard_text(const std::string &text) {
+  std::cerr << "[DEBUG] set_clipboard_text: writing " << text.size() << " bytes"
+            << std::endl;
 #ifdef __linux__
-  FILE *pipe = popen("xclip -selection clipboard -i", "w");
+  const char *display = std::getenv("DISPLAY");
+  std::cerr << "[DEBUG] set_clipboard_text: DISPLAY="
+            << (display ? display : "(null)") << std::endl;
+
+  FILE *pipe = popen("xclip -selection clipboard -i 2>&1", "w");
   if (pipe) {
-    fwrite(text.c_str(), 1, text.size(), pipe);
-    pclose(pipe);
+    size_t written = fwrite(text.c_str(), 1, text.size(), pipe);
+    int result = pclose(pipe);
+    std::cerr << "[DEBUG] set_clipboard_text: wrote " << written
+              << " bytes, pclose=" << result << std::endl;
+  } else {
+    std::cerr << "[ERROR] set_clipboard_text: popen failed" << std::endl;
   }
 #elif __APPLE__
   FILE *pipe = popen("pbcopy", "w");
@@ -74,34 +103,68 @@ void set_clipboard_text(const std::string &text) {
 }
 
 void paste_clipboard() {
+  std::cerr << "[DEBUG] paste_clipboard: starting" << std::endl;
   [[maybe_unused]] int ret;
 #ifdef __linux__
-  ret = system("sleep 0.2 && xdotool key --clearmodifiers ctrl+v");
+  const char *display = std::getenv("DISPLAY");
+  std::cerr << "[DEBUG] paste_clipboard: DISPLAY="
+            << (display ? display : "(null)") << std::endl;
+
+  // Try xdotool
+  ret = system("xdotool version >/dev/null 2>&1");
+  if (ret != 0) {
+    std::cerr << "[ERROR] paste_clipboard: xdotool not found" << std::endl;
+  }
+
+  std::cerr << "[DEBUG] paste_clipboard: executing xdotool" << std::endl;
+  ret = system("sleep 0.2 && xdotool key --clearmodifiers ctrl+v 2>&1");
+  std::cerr << "[DEBUG] paste_clipboard: xdotool returned " << ret << std::endl;
 #elif __APPLE__
-  // osascript to pres command+v?
   ret = system("osascript -e 'tell application \"System Events\" to keystroke "
                "\"v\" using command down'");
 #elif _WIN32
-// Windows is harder via system command. Maybe SendKeys via VBS or Powershell?
-// Using a simple powershell SendKeys for now
-// system("powershell.exe -c \"Add-Type -AssemblyName System.Windows.Forms;
-// [System.Windows.Forms.SendKeys]::SendWait('^v')\"");
 #endif
 }
 
 void notify_user(const std::string &title, const std::string &message) {
+  std::cerr << "[DEBUG] notify_user: " << title << " - " << message
+            << std::endl;
   [[maybe_unused]] int ret;
 #ifdef __linux__
-  std::string cmd = "notify-send \"" + title + "\" \"" + message + "\"";
+  std::string cmd = "notify-send \"" + title + "\" \"" + message + "\" 2>&1";
   ret = system(cmd.c_str());
+  std::cerr << "[DEBUG] notify_user: notify-send returned " << ret << std::endl;
 #elif __APPLE__
   std::string cmd = "osascript -e 'display notification \"" + message +
                     "\" with title \"" + title + "\"'";
   ret = system(cmd.c_str());
 #elif _WIN32
-// Powershell notification logic is complex, skipping for brevity or use msg *
-// std::string cmd = "msg * " + message;
-// system(cmd.c_str());
+#endif
+}
+
+void show_log_dialog(const std::string &log_content) {
+#ifdef __linux__
+  // Use zenity to show log in a scrolling window
+  // Check if zenity is available
+  if (system("which zenity >/dev/null 2>&1") == 0) {
+    // Write log to temp file to safely pass to zenity
+    std::string tmp_file = "/tmp/fast_translator_error.log";
+    FILE *f = fopen(tmp_file.c_str(), "w");
+    if (f) {
+      fwrite(log_content.c_str(), 1, log_content.size(), f);
+      fclose(f);
+
+      std::string cmd = "zenity --text-info --title=\"Fast Translator Error\" "
+                        "--filename=\"" +
+                        tmp_file + "\" --width=600 --height=400 2>/dev/null";
+      system(cmd.c_str());
+    }
+  } else {
+    // Fallback to notify-send if zenity not found
+    notify_user("Fast Translator Error",
+                "Check logs at /tmp/fast_translator_debug.log");
+  }
+#elif _WIN32
 #endif
 }
 

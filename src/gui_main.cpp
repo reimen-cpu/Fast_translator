@@ -1,4 +1,5 @@
 #include "json.hpp" // Local JSON library
+#include "ollama.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -111,6 +112,13 @@ private:
   std::vector<std::string> allInstalledItems;
   std::vector<std::string> allAvailableItems;
 
+  // AI tab members
+  wxListBox *aiModelList;
+  wxTextCtrl *aiCmdPreview;
+  wxButton *btnAISetShortcut;
+  std::vector<std::string> ollamaModels;
+  std::string currentAIModel;
+
   struct PackageInfo {
     std::string name;
     std::string from_code;
@@ -129,6 +137,12 @@ private:
   void FilterList(wxListBox *list, const std::vector<std::string> &allItems,
                   const std::string &filter);
   void FetchRemotePackages(); // Helper to dl and parse index
+
+  // AI tab methods
+  void RefreshAIModels();
+  void OnAIModelSelected(wxCommandEvent &event);
+  void OnAISetShortcut(wxCommandEvent &event);
+  void OnRefreshAI(wxCommandEvent &event);
 
   std::string GetLangName(const std::string &code);
   std::string DownloadFile(
@@ -220,9 +234,39 @@ MainFrame::MainFrame(const wxString &title)
 
   pnlAvailable->SetSizer(sizerAvailable);
 
+  // --- Tab 3: AI Models (Ollama) ---
+  wxPanel *pnlAI = new wxPanel(notebook);
+  wxBoxSizer *sizerAI = new wxBoxSizer(wxVERTICAL);
+
+  sizerAI->Add(new wxStaticText(pnlAI, wxID_ANY, "Local AI Models (Ollama):"),
+               0, wxLEFT | wxTOP, 5);
+
+  aiModelList = new wxListBox(pnlAI, wxID_ANY);
+  sizerAI->Add(aiModelList, 1, wxEXPAND | wxALL, 5);
+
+  // Command Preview Section for AI
+  wxBoxSizer *sizerAICmd = new wxBoxSizer(wxHORIZONTAL);
+  aiCmdPreview = new wxTextCtrl(pnlAI, wxID_ANY, "", wxDefaultPosition,
+                                wxDefaultSize, wxTE_READONLY);
+  btnAISetShortcut = new wxButton(pnlAI, wxID_ANY, "Set Shortcut");
+
+  sizerAICmd->Add(new wxStaticText(pnlAI, wxID_ANY, "Command:"), 0,
+                  wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+  sizerAICmd->Add(aiCmdPreview, 1, wxEXPAND | wxRIGHT, 5);
+  sizerAICmd->Add(btnAISetShortcut, 0, wxALIGN_CENTER_VERTICAL);
+
+  sizerAI->Add(sizerAICmd, 0, wxEXPAND | wxALL, 5);
+
+  // Refresh button
+  wxButton *btnRefreshAI = new wxButton(pnlAI, wxID_ANY, "Refresh Models");
+  sizerAI->Add(btnRefreshAI, 0, wxALIGN_CENTER | wxALL, 10);
+
+  pnlAI->SetSizer(sizerAI);
+
   // --- Add Tabs ---
   notebook->AddPage(pnlInstalled, "Installed");
   notebook->AddPage(pnlAvailable, "Available");
+  notebook->AddPage(pnlAI, "AI");
 
   mainSizer->Add(notebook, 1, wxEXPAND | wxALL, 5);
   mainPanel->SetSizer(mainSizer);
@@ -235,6 +279,9 @@ MainFrame::MainFrame(const wxString &title)
   btnInstall->Bind(wxEVT_BUTTON, &MainFrame::OnInstall, this);
   searchInstalled->Bind(wxEVT_TEXT, &MainFrame::OnSearchInstalled, this);
   searchAvailable->Bind(wxEVT_TEXT, &MainFrame::OnSearchAvailable, this);
+  aiModelList->Bind(wxEVT_LISTBOX, &MainFrame::OnAIModelSelected, this);
+  btnAISetShortcut->Bind(wxEVT_BUTTON, &MainFrame::OnAISetShortcut, this);
+  btnRefreshAI->Bind(wxEVT_BUTTON, &MainFrame::OnRefreshAI, this);
 
   // Determine packages dir
   std::string exeDir = get_exec_dir();
@@ -267,6 +314,7 @@ MainFrame::MainFrame(const wxString &title)
 
   RefreshPackageList();
   FetchRemotePackages(); // Trigger fetch on startup
+  RefreshAIModels();     // Fetch Ollama models on startup
 }
 
 void MainFrame::FetchRemotePackages() {
@@ -423,7 +471,7 @@ void MainFrame::OnPackageSelected(wxCommandEvent &event) {
   }
 
   // Generate command
-  std::string exe = get_exec_dir() + "/Fast_translator";
+  std::string exe = get_exec_dir() + "/fast-translator";
   std::string cmd = exe + " " + from_code + ":" + to_code;
   cmdPreview->SetValue(cmd);
 
@@ -688,3 +736,106 @@ std::string MainFrame::DownloadFile(const std::string &url_str,
   dialog.Update(100);
   return ""; // Success
 }
+
+// --- AI Tab Methods ---
+
+void MainFrame::RefreshAIModels() {
+  aiModelList->Clear();
+  ollamaModels.clear();
+  currentAIModel.clear();
+  aiCmdPreview->SetValue("");
+
+  // Check if Ollama is available
+  if (!is_ollama_available()) {
+    aiModelList->AppendString("Ollama not available - is it running?");
+    aiModelList->AppendString("Start with: ollama serve");
+    return;
+  }
+
+  // Fetch models
+  ollamaModels = get_ollama_models();
+
+  if (ollamaModels.empty()) {
+    aiModelList->AppendString("No models installed.");
+    aiModelList->AppendString("Install one with: ollama pull <model>");
+    return;
+  }
+
+  for (const auto &model : ollamaModels) {
+    aiModelList->AppendString(model);
+  }
+}
+
+void MainFrame::OnAIModelSelected(wxCommandEvent &event) {
+  int sel = aiModelList->GetSelection();
+  if (sel == wxNOT_FOUND || sel >= static_cast<int>(ollamaModels.size()))
+    return;
+
+  currentAIModel = ollamaModels[sel];
+
+  // Generate command
+  std::string exe = get_exec_dir() + "/fast-translator";
+  std::string cmd = exe + " --ollama " + currentAIModel;
+  aiCmdPreview->SetValue(cmd);
+}
+
+void MainFrame::OnAISetShortcut(wxCommandEvent &event) {
+  if (currentAIModel.empty()) {
+    wxMessageBox("Select an AI model first.", "Info", wxOK);
+    return;
+  }
+
+  // Get current command
+  std::string cmd = aiCmdPreview->GetValue().ToStdString();
+
+  // Copy command to clipboard
+  if (wxTheClipboard->Open()) {
+    wxTheClipboard->SetData(new wxTextDataObject(cmd));
+    wxTheClipboard->Close();
+  }
+
+  // Detect desktop environment and open appropriate settings
+  std::string de = DetectDE();
+  std::string settingsCmd;
+  std::string instructions;
+
+  if (de == "kde") {
+    settingsCmd = "systemsettings kcm_keys &";
+    instructions = "KDE Keyboard Shortcuts will open.\n\n"
+                   "1. Click 'Add New' -> 'Command or Script'\n"
+                   "2. Paste the command (already copied)\n"
+                   "3. Click 'Add custom shortcut' and press your keys\n"
+                   "4. Click Apply";
+  } else if (de == "gnome") {
+    settingsCmd = "gnome-control-center keyboard &";
+    instructions = "GNOME Keyboard Settings will open.\n\n"
+                   "1. Scroll down to 'Custom Shortcuts'\n"
+                   "2. Click '+' to add new shortcut\n"
+                   "3. Name: 'Fast AI'\n"
+                   "4. Command: Paste (already copied)\n"
+                   "5. Click 'Set Shortcut' and press your keys";
+  } else if (de == "xfce") {
+    settingsCmd = "xfce4-keyboard-settings &";
+    instructions = "XFCE Keyboard Settings will open.\n\n"
+                   "1. Go to 'Application Shortcuts' tab\n"
+                   "2. Click 'Add'\n"
+                   "3. Paste the command (already copied)\n"
+                   "4. Press your desired shortcut keys";
+  } else {
+    wxMessageBox("Desktop environment not detected.\n\n"
+                 "Command copied to clipboard:\n" +
+                     cmd +
+                     "\n\n"
+                     "Please add this as a custom keyboard shortcut in your "
+                     "system settings.",
+                 "Manual Setup Required", wxOK | wxICON_INFORMATION);
+    return;
+  }
+
+  wxMessageBox("Command copied to clipboard!\n\n" + instructions,
+               "Set Keyboard Shortcut", wxOK | wxICON_INFORMATION);
+
+  [[maybe_unused]] int ret = system(settingsCmd.c_str());
+}
+
+void MainFrame::OnRefreshAI(wxCommandEvent &event) { RefreshAIModels(); }

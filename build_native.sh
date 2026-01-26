@@ -5,40 +5,51 @@ set -e
 VCPKG_ROOT="$HOME/vcpkg"
 BUILD_DIR="build"
 
-echo "=== Argos Native C++ Build Script ==="
+echo "=== Fast Translator Build Script ==="
 
 # 1. Check Prerequisites
 if [ ! -d "$VCPKG_ROOT" ]; then
     echo "Error: vcpkg not found at $VCPKG_ROOT"
-    echo "Please install vcpkg or update the VCPKG_ROOT variable in this script."
     exit 1
 fi
 
 if ! command -v cmake &> /dev/null; then
-    echo "Error: cmake is not installed."
+    echo "Error: cmake not installed"
     exit 1
 fi
 
 # 2. Setup Environment
-# Ensure local installs are found (often in /usr/local/lib/pkgconfig)
 export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
 export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
 
-# 3. Configure and Build
-echo "Configuring project..."
-mkdir -p "$BUILD_DIR"
+# 3. Clean build if requested
+if [ "$1" = "clean" ]; then
+    echo "Cleaning build directory..."
+    rm -rf "$BUILD_DIR"
+fi
 
-# Use vcpkg toolchain
-cmake -B "$BUILD_DIR" -S . \
-    -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-    -DCMAKE_BUILD_TYPE=Release
+# 4. Configure (only if needed)
+if [ ! -d "$BUILD_DIR" ] || [ ! -f "$BUILD_DIR/Makefile" ]; then
+    echo "Configuring project..."
+    mkdir -p "$BUILD_DIR"
+    cmake -B "$BUILD_DIR" -S . \
+        -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+        -DCMAKE_BUILD_TYPE=Release
+else
+    echo "Build directory exists, skipping configure..."
+fi
 
-echo "Building project..."
-cmake --build "$BUILD_DIR" --config Release
+# 5. Build
+echo "Building..."
+cmake --build "$BUILD_DIR" --config Release --parallel
 
+echo ""
 echo "=== Build Complete ==="
-echo "Executable located at: ./$BUILD_DIR/argos_native_cpp"
+echo "Executables:"
+echo "  ./$BUILD_DIR/Fast_translator"
+echo "  ./$BUILD_DIR/Fast_translator_manager"
 echo ""
 echo "Usage:"
-echo "  Translate EN -> ES: ./$BUILD_DIR/argos_native_cpp"
-echo "  Translate ES -> EN: ./$BUILD_DIR/argos_native_cpp es"
+echo "  Translation: ./$BUILD_DIR/Fast_translator es:en"
+echo "  AI Mode:     ./$BUILD_DIR/Fast_translator --ollama <model>"
+echo "  Manager GUI: ./$BUILD_DIR/Fast_translator_manager"
