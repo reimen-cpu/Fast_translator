@@ -72,9 +72,9 @@ fast-translator-manager
 ### 2️⃣ Translate & Ask AI
 1. **Select any text** on your screen (browser, document, generic text).
 2. **Press your configured Shortcut**.
-3. A notification will appear with:
-   - The **Translation** of the selected text.
-   - An **AI Generated Explanation** or context (if Ollama is running).
+3. The selected text will be **automatically replaced** by the result:
+   - The **Translation** of the text.
+   - Or the **AI Generated Response** (if Ollama is active).
 
 ### 3️⃣ AI Configuration (Ollama)
 To enable the AI features:
