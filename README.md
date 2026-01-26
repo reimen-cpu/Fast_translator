@@ -35,6 +35,16 @@
 
 ---
 
+## 🎥 AI Demonstration
+
+<div align="center">
+  <a href="https://github.com/reimen-cpu/Fast_translator/blob/main/img/AI%20Demonstration.mp4">
+    <h3>▶️ Click here to watch the AI Demonstration Video</h3>
+  </a>
+</div>
+
+---
+
 ## ✨ Features
 
 - 🤖 **AI Powered** - Get instant context-aware explanations via local **Ollama** LLMs at your fingertips!
