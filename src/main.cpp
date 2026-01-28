@@ -7,6 +7,8 @@
 // #include <sentencepiece_processor.h>
 #include "language_graph.h"
 #include "ollama.h"
+#include "response_processor.h"
+#include "role_manager.h"
 #include "translation.h"
 #include "utils.h"
 #ifdef _WIN32
@@ -147,8 +149,40 @@ int run_app(int argc, char *argv[]) {
     std::cerr << "[DEBUG] Ollama mode detected. Model: " << model << std::endl;
     std::cout << "Ollama mode: using model " << model << std::endl;
 
+    // Check for --role flag
+    std::string role_prompt;
+    std::string response_handler;
+
+    for (int i = 3; i < argc - 1; i++) {
+      if (std::string(argv[i]) == "--role" || std::string(argv[i]) == "-r") {
+        std::string role_name = argv[i + 1];
+        std::cerr << "[DEBUG] Role requested: " << role_name << std::endl;
+
+        // Use RoleManager
+        RoleManager::GetInstance().LoadRoles(); // Ensure roles are loaded
+        RoleInfo role = RoleManager::GetInstance().GetRole(role_name);
+
+        if (!role.name.empty()) {
+          role_prompt = role.prompt;
+          response_handler = role.response_handler;
+          std::cerr << "[DEBUG] Role loaded. Handler: " << response_handler
+                    << std::endl;
+        } else {
+          std::cerr << "[WARNING] Role '" << role_name
+                    << "' not found in config" << std::endl;
+        }
+        break;
+      }
+    }
+
     std::cerr << "[DEBUG] Sending query to Ollama..." << std::endl;
-    std::string response = query_ollama(model, input_text);
+    std::string response;
+
+    if (!role_prompt.empty()) {
+      response = query_ollama_with_role(model, input_text, role_prompt);
+    } else {
+      response = query_ollama(model, input_text);
+    }
     std::cerr << "[DEBUG] Ollama response length: " << response.size()
               << std::endl;
 
@@ -163,6 +197,13 @@ int run_app(int argc, char *argv[]) {
     if (resp_begin != std::string::npos) {
       const auto resp_end = response.find_last_not_of(" \t\n\r");
       response = response.substr(resp_begin, resp_end - resp_begin + 1);
+    }
+
+    // Process response if handler is set
+    if (!response_handler.empty()) {
+      std::cerr << "[DEBUG] Post-processing response with handler: "
+                << response_handler << std::endl;
+      response = ResponseProcessor::Process(response, response_handler);
     }
 
     std::cout << "Response: " << response << std::endl;

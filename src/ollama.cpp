@@ -89,6 +89,7 @@ std::vector<std::string> get_ollama_models() {
 std::string query_ollama(const std::string &model, const std::string &prompt) {
   // System prompt for focused, non-verbose responses
   static const std::string SYSTEM_PROMPT =
+      "Always answer in the user's language."
       "Absolute Mode. Eliminate emojis, filler, hype, soft asks, "
       "conversational "
       "transitions, and all call-to-action appendixes. Prioritize blunt, "
@@ -113,12 +114,75 @@ std::string query_ollama(const std::string &model, const std::string &prompt) {
   request["system"] = SYSTEM_PROMPT;
   request["stream"] = false;
 
-  // GPU/inference options to reduce resource usage
-  json options;
-  options["num_gpu"] = 20;   // Limit GPU layers (reduce from max)
-  options["num_thread"] = 4; // Limit CPU threads
-  options["num_ctx"] = 2048; // Smaller context window
-  request["options"] = options;
+  // Options removed to allow default Ollama behavior
+  // request["options"] = ...;
+
+  std::string post_data = request.dump();
+  std::string response =
+      http_request(OLLAMA_BASE_URL + "/api/generate", post_data);
+
+  if (response.empty()) {
+    return "Error: Failed to connect to Ollama. Is it running? (ollama serve)";
+  }
+
+  try {
+    json data = json::parse(response);
+
+    // Check for error
+    if (data.contains("error")) {
+      return "Error: " + data["error"].get<std::string>();
+    }
+
+    // Extract response text
+    if (data.contains("response")) {
+      return data["response"].get<std::string>();
+    }
+
+    return "Error: Unexpected response format from Ollama";
+  } catch (const std::exception &e) {
+    return "Error: Failed to parse Ollama response - " + std::string(e.what());
+  }
+}
+
+std::string query_ollama_with_role(const std::string &model,
+                                   const std::string &prompt,
+                                   const std::string &role) {
+  // System prompt for focused, non-verbose responses (same as query_ollama)
+  static const std::string SYSTEM_PROMPT =
+      "Absolute Mode. Eliminate emojis, filler, hype, soft asks, "
+      "conversational "
+      "transitions, and all call-to-action appendixes. Prioritize blunt, "
+      "directive "
+      "phrasing. Disable all behaviors optimizing for engagement, sentiment "
+      "uplift, "
+      "or interaction extension. Suppress emotional softening or continuation "
+      "bias. "
+      "Never mirror the user's diction, mood, or affect. No questions, no "
+      "offers, "
+      "no suggestions, no transitional phrasing. Terminate each reply "
+      "immediately "
+      "after delivering the requested material. No appendixes, no soft "
+      "closures. "
+      "Challenge assumptions with precision, offer unfamiliar perspectives. "
+      "Be ruthless but respectful. Seek truth above comfort.";
+
+  // Build request JSON
+  json request;
+  request["model"] = model;
+
+  // Use role as system prompt if available to override hardcoded default
+  if (!role.empty()) {
+    request["prompt"] = prompt;
+    request["system"] = role; // The role IS the system prompt
+  } else {
+    request["prompt"] = prompt; // No role, use hardcoded system
+    request["system"] = SYSTEM_PROMPT;
+  }
+
+  request["stream"] = false;
+
+  // Options removed to allow default Ollama behavior
+  // request["options"] = ...;
 
   std::string post_data = request.dump();
   std::string response =

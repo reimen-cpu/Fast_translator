@@ -41,6 +41,8 @@ add_executable(Fast_translator
     src/tokenizer_bpe.cpp
     src/language_graph.cpp
     src/ollama.cpp
+    src/role_manager.cpp
+    src/response_processor.cpp
 )
 
 target_link_libraries(Fast_translator
@@ -68,6 +70,7 @@ if(wxWidgets_FOUND OR TARGET wx::core)
     add_executable(Fast_translator_manager
         src/gui_main.cpp
         src/ollama.cpp
+        src/role_manager.cpp
     )
     target_link_libraries(Fast_translator_manager
         PRIVATE

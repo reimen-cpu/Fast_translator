@@ -1,5 +1,6 @@
 #include "json.hpp" // Local JSON library
 #include "ollama.h"
+#include "role_manager.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -119,6 +120,20 @@ private:
   std::vector<std::string> ollamaModels;
   std::string currentAIModel;
 
+  // AI Roles tab members
+  wxListBox *aiRoleList;
+  wxTextCtrl *roleNameInput;
+  wxTextCtrl *rolePromptInput;
+  wxTextCtrl *aiRoleCmdPreview;
+  wxChoice *aiRoleModelChoice;
+  wxButton *btnAddRole;
+  wxButton *btnEditRole;
+  wxButton *btnDeleteRole;
+  wxButton *btnAIRoleSetShortcut;
+  std::string currentSelectedRole;
+
+  std::vector<RoleInfo> userRoles;
+
   struct PackageInfo {
     std::string name;
     std::string from_code;
@@ -143,6 +158,20 @@ private:
   void OnAIModelSelected(wxCommandEvent &event);
   void OnAISetShortcut(wxCommandEvent &event);
   void OnRefreshAI(wxCommandEvent &event);
+
+  // AI Roles tab methods
+  void LoadRoles();
+  void SaveRoles();
+  void RefreshRoleList();
+  void OnRoleSelected(wxCommandEvent &event);
+  void OnPrepareNewRole(wxCommandEvent &event);
+  void OnAddRole(wxCommandEvent &event);
+  void OnEditRole(wxCommandEvent &event);
+  void OnDeleteRole(wxCommandEvent &event);
+  void OnAIRoleSetShortcut(wxCommandEvent &event);
+  void OnRoleModelSelected(wxCommandEvent &event);
+  void UpdateRoleCommandPreview();
+  std::string GetRolesConfigPath();
 
   std::string GetLangName(const std::string &code);
   std::string DownloadFile(
@@ -181,30 +210,41 @@ MainFrame::MainFrame(const wxString &title)
                       5);
 
   sizerInstalled->Add(
-      new wxStaticText(pnlInstalled, wxID_ANY, "Installed Languages:"), 0,
-      wxLEFT | wxTOP, 5);
+      new wxStaticText(pnlInstalled, wxID_ANY, "Locally Installed Languages:"),
+      0, wxLEFT | wxTOP, 10);
 
   installedList = new wxListBox(pnlInstalled, wxID_ANY);
-  sizerInstalled->Add(installedList, 1, wxEXPAND | wxALL, 5);
+  installedList->SetToolTip("Select a package to see details or remove it.");
+  sizerInstalled->Add(installedList, 1, wxEXPAND | wxALL, 10);
 
   // Command Preview Section
   wxBoxSizer *sizerCmd = new wxBoxSizer(wxHORIZONTAL);
   cmdPreview = new wxTextCtrl(pnlInstalled, wxID_ANY, "", wxDefaultPosition,
                               wxDefaultSize, wxTE_READONLY);
-  btnSetShortcut = new wxButton(pnlInstalled, wxID_ANY, "Set Shortcut");
+  cmdPreview->SetToolTip(
+      "Copy this command to use in your scripts or terminal.");
 
-  sizerCmd->Add(new wxStaticText(pnlInstalled, wxID_ANY, "Command:"), 0,
-                wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+  btnSetShortcut = new wxButton(pnlInstalled, wxID_ANY, "Set Shortcut");
+  btnSetShortcut->SetToolTip(
+      "Assign a system keyboard shortcut to run this translation.");
+
+  sizerCmd->Add(
+      new wxStaticText(pnlInstalled, wxID_ANY, "Integration Command:"), 0,
+      wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
   sizerCmd->Add(cmdPreview, 1, wxEXPAND | wxRIGHT, 5);
   sizerCmd->Add(btnSetShortcut, 0, wxALIGN_CENTER_VERTICAL);
 
-  sizerInstalled->Add(sizerCmd, 0, wxEXPAND | wxALL, 5);
+  sizerInstalled->Add(sizerCmd, 0, wxEXPAND | wxALL, 10);
 
   // Buttons
   wxBoxSizer *hboxBtns = new wxBoxSizer(wxHORIZONTAL);
   wxButton *btnRemove = new wxButton(pnlInstalled, wxID_ANY, "Remove Selected");
-  wxButton *btnRefresh = new wxButton(pnlInstalled, wxID_ANY, "Refresh");
-  hboxBtns->Add(btnRemove, 0, wxRIGHT, 5);
+  btnRemove->SetToolTip("Uninstall the selected language package.");
+
+  wxButton *btnRefresh = new wxButton(pnlInstalled, wxID_ANY, "Refresh List");
+  btnRefresh->SetToolTip("Reload the list of installed packages.");
+
+  hboxBtns->Add(btnRemove, 0, wxRIGHT, 10);
   hboxBtns->Add(btnRefresh, 0);
 
   sizerInstalled->Add(hboxBtns, 0, wxALIGN_CENTER | wxALL, 10);
@@ -230,7 +270,10 @@ MainFrame::MainFrame(const wxString &title)
 
   wxButton *btnInstall =
       new wxButton(pnlAvailable, wxID_ANY, "Download & Install");
-  sizerAvailable->Add(btnInstall, 0, wxALIGN_CENTER | wxALL, 10);
+  btnInstall->SetToolTip(
+      "Download and install the selected language package from the internet.");
+
+  sizerAvailable->Add(btnInstall, 0, wxALIGN_CENTER | wxALL, 15);
 
   pnlAvailable->SetSizer(sizerAvailable);
 
@@ -250,9 +293,10 @@ MainFrame::MainFrame(const wxString &title)
                                 wxDefaultSize, wxTE_READONLY);
   btnAISetShortcut = new wxButton(pnlAI, wxID_ANY, "Set Shortcut");
 
-  sizerAICmd->Add(new wxStaticText(pnlAI, wxID_ANY, "Command:"), 0,
+  sizerAICmd->Add(new wxStaticText(pnlAI, wxID_ANY, "Integration Command:"), 0,
                   wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
   sizerAICmd->Add(aiCmdPreview, 1, wxEXPAND | wxRIGHT, 5);
+  btnAISetShortcut->SetToolTip("Assign a keyboard shortcut for this AI model.");
   sizerAICmd->Add(btnAISetShortcut, 0, wxALIGN_CENTER_VERTICAL);
 
   sizerAI->Add(sizerAICmd, 0, wxEXPAND | wxALL, 5);
@@ -263,10 +307,86 @@ MainFrame::MainFrame(const wxString &title)
 
   pnlAI->SetSizer(sizerAI);
 
+  // --- Tab 4: AI Roles ---
+  wxPanel *pnlAIRoles = new wxPanel(notebook);
+  wxBoxSizer *sizerAIRoles = new wxBoxSizer(wxVERTICAL);
+
+  sizerAIRoles->Add(
+      new wxStaticText(pnlAIRoles, wxID_ANY, "Custom AI Roles (Personas):"), 0,
+      wxLEFT | wxTOP, 10);
+
+  // Roles list
+  aiRoleList = new wxListBox(pnlAIRoles, wxID_ANY);
+  sizerAIRoles->Add(aiRoleList, 1, wxEXPAND | wxALL, 5);
+
+  // Role editing section
+  wxStaticBoxSizer *editBox =
+      new wxStaticBoxSizer(wxVERTICAL, pnlAIRoles, "Role Editor");
+
+  wxBoxSizer *nameRow = new wxBoxSizer(wxHORIZONTAL);
+  nameRow->Add(new wxStaticText(pnlAIRoles, wxID_ANY, "Name:"), 0,
+               wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+  roleNameInput = new wxTextCtrl(pnlAIRoles, wxID_ANY);
+  nameRow->Add(roleNameInput, 1, wxEXPAND);
+  editBox->Add(nameRow, 0, wxEXPAND | wxALL, 5);
+
+  editBox->Add(new wxStaticText(pnlAIRoles, wxID_ANY,
+                                "Role Prompt (instructions for the AI):"),
+               0, wxLEFT | wxTOP, 5);
+  rolePromptInput = new wxTextCtrl(pnlAIRoles, wxID_ANY, "", wxDefaultPosition,
+                                   wxSize(-1, 80), wxTE_MULTILINE);
+  editBox->Add(rolePromptInput, 0, wxEXPAND | wxALL, 5);
+
+  // Buttons row for role management
+  wxBoxSizer *btnRow = new wxBoxSizer(wxHORIZONTAL);
+  btnAddRole = new wxButton(pnlAIRoles, wxID_ANY, "Add New");
+  btnAddRole->SetToolTip("Create a new custom AI role.");
+
+  btnEditRole = new wxButton(pnlAIRoles, wxID_ANY, "Save Changes");
+  btnEditRole->SetToolTip("Save changes to the selected role.");
+
+  btnDeleteRole = new wxButton(pnlAIRoles, wxID_ANY, "Delete");
+  btnDeleteRole->SetToolTip("Permanently delete the selected role.");
+
+  btnRow->Add(btnAddRole, 0, wxRIGHT, 5);
+  btnRow->Add(btnEditRole, 0, wxRIGHT, 5);
+  btnRow->Add(btnDeleteRole, 0);
+  editBox->Add(btnRow, 0, wxALIGN_CENTER | wxALL, 10);
+
+  sizerAIRoles->Add(editBox, 0, wxEXPAND | wxALL, 5);
+
+  // Model selection and command preview
+  wxBoxSizer *modelRow = new wxBoxSizer(wxHORIZONTAL);
+  modelRow->Add(new wxStaticText(pnlAIRoles, wxID_ANY, "Model:"), 0,
+                wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+  aiRoleModelChoice = new wxChoice(pnlAIRoles, wxID_ANY);
+  modelRow->Add(aiRoleModelChoice, 1, wxEXPAND);
+  sizerAIRoles->Add(modelRow, 0, wxEXPAND | wxLEFT | wxRIGHT, 5);
+
+  // Command Preview Section for AI Roles
+  wxBoxSizer *sizerAIRoleCmd = new wxBoxSizer(wxHORIZONTAL);
+  aiRoleCmdPreview = new wxTextCtrl(pnlAIRoles, wxID_ANY, "", wxDefaultPosition,
+                                    wxDefaultSize, wxTE_READONLY);
+  aiRoleCmdPreview->SetToolTip("Command to launch this specific role.");
+
+  btnAIRoleSetShortcut = new wxButton(pnlAIRoles, wxID_ANY, "Set Shortcut");
+  btnAIRoleSetShortcut->SetToolTip("Assign a keyboard shortcut for this role.");
+
+  sizerAIRoleCmd->Add(
+      new wxStaticText(pnlAIRoles, wxID_ANY, "Integration Command:"), 0,
+      wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+  sizerAIRoleCmd->Add(aiRoleCmdPreview, 1, wxEXPAND | wxRIGHT, 5);
+  sizerAIRoleCmd->Add(btnAIRoleSetShortcut, 0, wxALIGN_CENTER_VERTICAL);
+
+  sizerAIRoles->Add(sizerAIRoleCmd, 0, wxEXPAND | wxALL, 5);
+
+  pnlAIRoles->SetSizer(sizerAIRoles);
+
   // --- Add Tabs ---
   notebook->AddPage(pnlInstalled, "Installed");
   notebook->AddPage(pnlAvailable, "Available");
   notebook->AddPage(pnlAI, "AI");
+  notebook->AddPage(pnlAIRoles, "AI Roles");
 
   mainSizer->Add(notebook, 1, wxEXPAND | wxALL, 5);
   mainPanel->SetSizer(mainSizer);
@@ -282,6 +402,15 @@ MainFrame::MainFrame(const wxString &title)
   aiModelList->Bind(wxEVT_LISTBOX, &MainFrame::OnAIModelSelected, this);
   btnAISetShortcut->Bind(wxEVT_BUTTON, &MainFrame::OnAISetShortcut, this);
   btnRefreshAI->Bind(wxEVT_BUTTON, &MainFrame::OnRefreshAI, this);
+
+  // AI Roles bindings
+  aiRoleList->Bind(wxEVT_LISTBOX, &MainFrame::OnRoleSelected, this);
+  btnAddRole->Bind(wxEVT_BUTTON, &MainFrame::OnPrepareNewRole, this);
+  btnEditRole->Bind(wxEVT_BUTTON, &MainFrame::OnEditRole, this);
+  btnDeleteRole->Bind(wxEVT_BUTTON, &MainFrame::OnDeleteRole, this);
+  btnAIRoleSetShortcut->Bind(wxEVT_BUTTON, &MainFrame::OnAIRoleSetShortcut,
+                             this);
+  aiRoleModelChoice->Bind(wxEVT_CHOICE, &MainFrame::OnRoleModelSelected, this);
 
   // Determine packages dir
   std::string exeDir = get_exec_dir();
@@ -315,6 +444,8 @@ MainFrame::MainFrame(const wxString &title)
   RefreshPackageList();
   FetchRemotePackages(); // Trigger fetch on startup
   RefreshAIModels();     // Fetch Ollama models on startup
+  LoadRoles();           // Load user roles on startup
+  RefreshRoleList();     // Populate role list
 }
 
 void MainFrame::FetchRemotePackages() {
@@ -839,3 +970,323 @@ void MainFrame::OnAISetShortcut(wxCommandEvent &event) {
 }
 
 void MainFrame::OnRefreshAI(wxCommandEvent &event) { RefreshAIModels(); }
+
+// ---// AI Roles tab methods
+void MainFrame::LoadRoles() {
+  // Delegate to RoleManager
+  RoleManager::GetInstance().LoadRoles();
+  userRoles = RoleManager::GetInstance().GetRoles();
+}
+
+void MainFrame::SaveRoles() {
+  // Delegate to RoleManager - we update the manager when adding/editing
+  RoleManager::GetInstance().SaveRoles();
+}
+
+void MainFrame::RefreshRoleList() {
+  aiRoleList->Clear();
+  // Don't clear inputs here, as it might annoy user if just refreshing list
+  // roleNameInput->Clear();
+  // rolePromptInput->Clear();
+  // currentSelectedRole.clear(); // Preserve selection if possible?
+
+  // Current logic requires re-selection after refresh to keep state consistent
+  // But let's check if we can keep selection
+
+  // ... existing code wraps clear ...
+
+  for (const auto &role : userRoles) {
+    aiRoleList->AppendString(role.name);
+  }
+
+  // Update model choice dropdown - preserve current selection if possible
+  std::string previousSelection;
+  if (aiRoleModelChoice->GetSelection() != wxNOT_FOUND) {
+    previousSelection = aiRoleModelChoice->GetStringSelection().ToStdString();
+  }
+
+  aiRoleModelChoice->Clear();
+  for (const auto &model : ollamaModels) {
+    aiRoleModelChoice->Append(model);
+  }
+
+  // Restore previous selection or default to first
+  if (!previousSelection.empty()) {
+    int idx = aiRoleModelChoice->FindString(previousSelection);
+    if (idx != wxNOT_FOUND) {
+      aiRoleModelChoice->SetSelection(idx);
+    } else if (!ollamaModels.empty()) {
+      aiRoleModelChoice->SetSelection(0);
+    }
+  } else if (!ollamaModels.empty()) {
+    aiRoleModelChoice->SetSelection(0);
+  }
+
+  UpdateRoleCommandPreview();
+}
+
+void MainFrame::OnRoleSelected(wxCommandEvent &event) {
+  int sel = aiRoleList->GetSelection();
+  if (sel == wxNOT_FOUND || sel >= static_cast<int>(userRoles.size()))
+    return;
+
+  currentSelectedRole = aiRoleList->GetString(sel).ToStdString();
+  roleNameInput->SetValue(wxString::FromUTF8(currentSelectedRole));
+
+  // Find role info
+  RoleInfo r = RoleManager::GetInstance().GetRole(currentSelectedRole);
+  rolePromptInput->SetValue(wxString::FromUTF8(r.prompt));
+
+  roleNameInput->SetEditable(true);
+  btnDeleteRole->Enable();
+
+  UpdateRoleCommandPreview();
+}
+
+void MainFrame::OnPrepareNewRole(wxCommandEvent &event) {
+  // Clear selection
+  aiRoleList->SetSelection(wxNOT_FOUND);
+  currentSelectedRole = "";
+
+  // Clear inputs
+  roleNameInput->Clear();
+  rolePromptInput->Clear();
+
+  // Ensure editable
+  roleNameInput->SetEditable(true);
+  btnDeleteRole->Disable(); // Cannot delete a new/unsaved role
+
+  // Focus name input
+  roleNameInput->SetFocus();
+
+  UpdateRoleCommandPreview();
+}
+
+void MainFrame::OnAddRole(wxCommandEvent &event) {
+  wxString nameWx = roleNameInput->GetValue();
+  wxString promptWx = rolePromptInput->GetValue();
+
+  if (nameWx.Trim().IsEmpty()) {
+    wxMessageBox("Please enter a role name.", "Error", wxOK | wxICON_WARNING);
+    return;
+  }
+
+  if (promptWx.Trim().IsEmpty()) {
+    wxMessageBox("Please enter a role prompt.", "Error", wxOK | wxICON_WARNING);
+    return;
+  }
+
+  std::string name = std::string(nameWx.ToUTF8());
+  std::string prompt = std::string(promptWx.ToUTF8());
+
+  // Check if name already exists
+  if (!RoleManager::GetInstance().GetRole(name).name.empty()) {
+    // Check if we are actually just re-saving the SAME role as a duplication
+    // If user clicked "Add New" but used an existing name, we should warn.
+    wxMessageBox("A role with this name already exists. Use 'Save Changes' to "
+                 "update it.",
+                 "Error", wxOK | wxICON_WARNING);
+    return;
+  }
+
+  RoleInfo newRole;
+  newRole.name = name;
+  newRole.prompt = prompt;
+
+  RoleManager::GetInstance().AddRole(newRole);
+
+  LoadRoles(); // Refresh local cache from manager
+
+  // Refresh list and select the new one
+  RefreshRoleList();
+
+  // Find index of new role
+  for (size_t i = 0; i < userRoles.size(); i++) {
+    if (userRoles[i].name == name) {
+      aiRoleList->SetSelection(i);
+      currentSelectedRole = name;
+      break;
+    }
+  }
+
+  wxMessageBox("Role '" + name + "' added successfully!", "Success", wxOK);
+}
+
+void MainFrame::OnEditRole(wxCommandEvent &event) {
+  wxString nameWx = roleNameInput->GetValue();
+  wxString promptWx = rolePromptInput->GetValue();
+
+  // Validate inputs
+  if (nameWx.Trim().IsEmpty()) {
+    wxMessageBox("Role name cannot be empty.", "Error", wxOK | wxICON_WARNING);
+    return;
+  }
+  if (promptWx.Trim().IsEmpty()) {
+    wxMessageBox("Role prompt cannot be empty.", "Error",
+                 wxOK | wxICON_WARNING);
+    return;
+  }
+
+  // Convert SAFELY to std::string (UTF-8) after validation
+  std::string newName = std::string(nameWx.ToUTF8());
+  std::string newPrompt = std::string(promptWx.ToUTF8());
+
+  if (currentSelectedRole.empty()) {
+    // Direct to Add Logic
+    OnAddRole(event);
+    return;
+  }
+
+  // We are Updating 'currentSelectedRole' to 'newName'
+
+  // Find and update the role
+  RoleInfo updatedRole;
+  updatedRole.name = newName;
+  updatedRole.prompt = newPrompt;
+
+  RoleManager::GetInstance().UpdateRole(currentSelectedRole, updatedRole);
+
+  currentSelectedRole = newName;
+  LoadRoles(); // Refresh local cache
+  RefreshRoleList();
+
+  // Re-select the edited role
+  int newIndex = -1;
+  int listCount = aiRoleList->GetCount();
+  for (int i = 0; i < listCount; i++) {
+    if (aiRoleList->GetString(i) == newName) {
+      newIndex = i;
+      break;
+    }
+  }
+
+  if (newIndex != -1) {
+    aiRoleList->SetSelection(newIndex);
+  }
+
+  wxMessageBox("Role updated successfully!", "Success", wxOK);
+}
+
+void MainFrame::OnDeleteRole(wxCommandEvent &event) {
+  if (currentSelectedRole.empty()) {
+    wxMessageBox("Please select a role to delete.", "Error",
+                 wxOK | wxICON_WARNING);
+    return;
+  }
+
+  int ans = wxMessageBox("Are you sure you want to delete role '" +
+                             currentSelectedRole + "'?",
+                         "Confirm Delete", wxYES_NO | wxICON_WARNING);
+  if (ans == wxYES) {
+    RoleManager::GetInstance().DeleteRole(currentSelectedRole);
+
+    LoadRoles(); // Refresh local cache
+    RefreshRoleList();
+
+    roleNameInput->Clear();
+    rolePromptInput->Clear();
+    currentSelectedRole.clear();
+
+    wxMessageBox("Role deleted.", "Success", wxOK);
+  }
+}
+void MainFrame::OnRoleModelSelected(wxCommandEvent &event) {
+  UpdateRoleCommandPreview();
+}
+
+void MainFrame::UpdateRoleCommandPreview() {
+  if (currentSelectedRole.empty()) {
+    aiRoleCmdPreview->Clear();
+    return;
+  }
+
+  std::string roleName = currentSelectedRole;
+
+  // Wrap role name in quotes
+  std::string safeRoleName = "\"" + roleName + "\"";
+
+  // For Prompt Enhancer, we don't strictly need to do anything different here
+  // command-wise The backend handles --role "Prompt Enhancer"
+
+  int sel = aiRoleModelChoice->GetSelection();
+  std::string model;
+  if (sel != wxNOT_FOUND) {
+    model = aiRoleModelChoice->GetString(sel).ToStdString();
+  } else {
+    model = "llama3"; // default fallback
+  }
+
+  std::string exe = get_exec_dir() + "/fast-translator";
+  // Wrap role name in quotes
+  std::string cmd = exe + " --ollama " + model + " --role \"" + roleName + "\"";
+
+  aiRoleCmdPreview->SetValue(cmd);
+}
+
+// Helper removed as it's now in RoleManager
+std::string MainFrame::GetRolesConfigPath() {
+  return RoleManager::GetInstance().GetConfigPath();
+}
+void MainFrame::OnAIRoleSetShortcut(wxCommandEvent &event) {
+  if (currentSelectedRole.empty()) {
+    wxMessageBox("Select a role first.", "Info", wxOK);
+    return;
+  }
+
+  if (aiRoleModelChoice->GetSelection() == wxNOT_FOUND) {
+    wxMessageBox("Select a model first.", "Info", wxOK);
+    return;
+  }
+
+  // Get current command
+  std::string cmd = aiRoleCmdPreview->GetValue().ToStdString();
+
+  // Copy command to clipboard
+  if (wxTheClipboard->Open()) {
+    wxTheClipboard->SetData(new wxTextDataObject(cmd));
+    wxTheClipboard->Close();
+  }
+
+  // Detect desktop environment and open appropriate settings
+  std::string de = DetectDE();
+  std::string settingsCmd;
+  std::string instructions;
+
+  if (de == "kde") {
+    settingsCmd = "systemsettings kcm_keys &";
+    instructions = "KDE Keyboard Shortcuts will open.\n\n"
+                   "1. Click 'Add New' -> 'Command or Script'\n"
+                   "2. Paste the command (already copied)\n"
+                   "3. Click 'Add custom shortcut' and press your keys\n"
+                   "4. Click Apply";
+  } else if (de == "gnome") {
+    settingsCmd = "gnome-control-center keyboard &";
+    instructions = "GNOME Keyboard Settings will open.\n\n"
+                   "1. Scroll down to 'Custom Shortcuts'\n"
+                   "2. Click '+' to add new shortcut\n"
+                   "3. Name: 'Fast AI Role'\n"
+                   "4. Command: Paste (already copied)\n"
+                   "5. Click 'Set Shortcut' and press your keys";
+  } else if (de == "xfce") {
+    settingsCmd = "xfce4-keyboard-settings &";
+    instructions = "XFCE Keyboard Settings will open.\n\n"
+                   "1. Go to 'Application Shortcuts' tab\n"
+                   "2. Click 'Add'\n"
+                   "3. Paste the command (already copied)\n"
+                   "4. Press your desired shortcut keys";
+  } else {
+    wxMessageBox("Desktop environment not detected.\n\n"
+                 "Command copied to clipboard:\n" +
+                     cmd +
+                     "\n\n"
+                     "Please add this as a custom keyboard shortcut in your "
+                     "system settings.",
+                 "Manual Setup Required", wxOK | wxICON_INFORMATION);
+    return;
+  }
+
+  wxMessageBox("Command copied to clipboard!\n\n" + instructions,
+               "Set Keyboard Shortcut", wxOK | wxICON_INFORMATION);
+
+  [[maybe_unused]] int ret = system(settingsCmd.c_str());
+}

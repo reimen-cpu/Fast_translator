@@ -20,7 +20,7 @@ Makefile
 *.sln
 *.user
 *.ninja
-
+*.cache
 # Archivos temporales del sistema
 *.swp
 *~
