@@ -7,14 +7,19 @@ BUILD_DIR="build"
 
 echo "=== Fast Translator Build Script ==="
 
-# 1. Check Prerequisites
+# 1. Check Prerequisites and Install Dependencies
+echo "Checking dependencies..."
+chmod +x ./scripts/install_dependencies.sh
+./scripts/install_dependencies.sh
+
 if [ ! -d "$VCPKG_ROOT" ]; then
-    echo "Error: vcpkg not found at $VCPKG_ROOT"
-    exit 1
+    echo "Warning: vcpkg not found at $VCPKG_ROOT. Attempting to use system libraries only."
+    # We don't exit here because we might strictly use system libs now.
+    # But if existing logic relies on vcpkg toolchain file, we might warn.
 fi
 
 if ! command -v cmake &> /dev/null; then
-    echo "Error: cmake not installed"
+    echo "Error: cmake not installed (and failed to install via script?)"
     exit 1
 fi
 
@@ -32,8 +37,13 @@ fi
 if [ ! -d "$BUILD_DIR" ] || [ ! -f "$BUILD_DIR/Makefile" ]; then
     echo "Configuring project..."
     mkdir -p "$BUILD_DIR"
+    TOOLCHAIN=""
+    if [ -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
+        TOOLCHAIN="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+    fi
+
     cmake -B "$BUILD_DIR" -S . \
-        -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+        $TOOLCHAIN \
         -DCMAKE_BUILD_TYPE=Release
 else
     echo "Build directory exists, skipping configure..."

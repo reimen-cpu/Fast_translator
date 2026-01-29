@@ -7,11 +7,16 @@ set -e
 # ===========================================
 
 PACKAGE_NAME="fast-translator"
-VERSION="1.0.1"
+VERSION="1.0.2"
 ARCH="amd64"
 BUILD_DIR="build-deb"
 DEB_ROOT="deb-build/${PACKAGE_NAME}_${VERSION}_${ARCH}"
 OUTPUT_DIR="dist"
+
+# 0. Check Dependencies
+echo "Checking dependencies..."
+chmod +x ./scripts/install_dependencies.sh
+./scripts/install_dependencies.sh
 
 echo "=== Building Fast Translator .deb Package v${VERSION} ==="
 
@@ -32,10 +37,15 @@ mkdir -p "$BUILD_DIR"
 
 export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
 
+TOOLCHAIN=""
+if [ -f "$HOME/vcpkg/scripts/buildsystems/vcpkg.cmake" ]; then
+    TOOLCHAIN="-DCMAKE_TOOLCHAIN_FILE=$HOME/vcpkg/scripts/buildsystems/vcpkg.cmake"
+fi
+
 cmake -B "$BUILD_DIR" -S . \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
-    -DCMAKE_TOOLCHAIN_FILE="$HOME/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    $TOOLCHAIN
 
 cmake --build "$BUILD_DIR" --config Release --parallel
 
