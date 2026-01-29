@@ -99,19 +99,11 @@ To enable the AI features:
 
 If you are a developer or using a non-Debian distribution, you can build from source.
 
-### Prerequisites (Ubuntu/Debian)
-```bash
-sudo apt update
-sudo apt install -y build-essential cmake git curl wget \
-    libwxgtk3.2-dev libcurl4-openssl-dev \
-    xclip xdotool libnotify-bin
-```
-
 ### Build Instructions
 ```bash
-git clone https://github.com/reimen-cpu/Fast_translator.git
+sudo git clone https://github.com/reimen-cpu/Fast_translator
 cd Fast_translator
-./build_native.sh
+./build_deb.sh
 ```
 
 ---
